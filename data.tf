@@ -56,7 +56,3 @@ data "azurerm_subnet" "jumphost_subnet" {
   virtual_network_name = data.azurerm_virtual_network.spoke.name
   resource_group_name  = data.azurerm_virtual_network.spoke.resource_group_name
 }
-
-data "azuread_group" "GenAI-Reader" {
-  display_name = "Azure-SCP-Kabi-GenAI-Reader"
-}

@@ -1,8 +1,4 @@
-resource "azurerm_role_assignment" "permission8" {
-  scope                = module.openaitest.azurerm_resource_group_id
-  role_definition_name = "Storage Blob Data Contributor"
-  principal_id         = data.azuread_group.GenAI-Reader.object_id
-}
+
 
 resource "azurerm_role_assignment" "permission9" {
   scope                = module.openai.azurerm_storage_account_id
