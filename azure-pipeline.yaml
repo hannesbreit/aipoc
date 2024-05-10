@@ -1,0 +1,154 @@
+pool:
+  vmImage: 'ubuntu-latest' 
+
+trigger: none
+
+variables:
+  - name: SERVICE_CONNECTION_NAME
+    value: FK.Rag.Medtech-Infrastructure-CICD
+  - name: SERVICE_CONNECTION_BACKEND
+    value: FK.Rag.Medtech-Infrastructure-CICD
+  - name: TERRAFORM_VERSION
+    value: 1.7.4
+  - name: TF_STORAGE_ACCOUNT_NAME
+    value: 'medtechtfweu001'
+  - name: TF_STORAGE_ACCOUNT_RG
+    value: 'rg-medtech-terrafrom-dev-weu'
+  - name: TF_STORAGE_ACCOUNT_CONTAINER_KEY_NAME
+    value: 'terraform.tfstate'
+  - name: TF_STORAGE_ACCOUNT_CONTAINER_NAME
+    value: 'terraform'
+  - name: TF_LOCATION
+    value: 'westeurope'
+
+parameters: 
+  - name: TERRAFORM_VERSION
+    type: string
+    default: '1.7.4'
+
+stages:
+  - stage: CI
+    displayName: CI
+    jobs:
+      - job: Analyze
+        displayName: '🔍Analyze'
+        steps:
+
+        - task: TerraformTaskV4@4
+          displayName: '🔨Terraform Format'
+          inputs:
+            provider: 'azurerm'
+            command: 'custom'
+            customCommand: 'fmt'
+            commandOptions: '-recursive -check'
+            outputTo: 'console'
+            environmentServiceNameAzureRM: $(SERVICE_CONNECTION_NAME)
+
+      - job: ContinuousIntegration
+        displayName: '🔨Build'
+        dependsOn: Analyze
+        steps:
+        - task: Bash@3
+          displayName: '⚙️ Pin Terraform'
+          inputs:
+            targetType: 'inline'
+            script: |
+              set -euo pipefail
+
+              curl -SL "https://releases.hashicorp.com/terraform/${{ parameters.TERRAFORM_VERSION }}/terraform_${{ parameters.TERRAFORM_VERSION }}_linux_amd64.zip" --output terraform.zip
+              unzip "terraform.zip"
+              sudo mv terraform /usr/local/bin
+              terraform --version
+              rm terraform.zip
+
+        - task: TerraformTaskV4@4
+          displayName: 🌟Terraform Init
+          continueOnError: false
+          inputs:
+            provider: 'azurerm'
+            command: 'init'
+            commandOptions: '-backend=false'
+            backendServiceArm: '$(SERVICE_CONNECTION_BACKEND)'
+            backendAzureRmResourceGroupName: $(TF_STORAGE_ACCOUNT_RG)
+            backendAzureRmStorageAccountName: $(TF_STORAGE_ACCOUNT_NAME)
+            backendAzureRmContainerName: $(TF_STORAGE_ACCOUNT_CONTAINER_NAME)
+            backendAzureRmKey: $(TF_STORAGE_ACCOUNT_CONTAINER_KEY_NAME)
+        
+        - task: TerraformTaskV4@4
+          name: terraformValidate
+          displayName: '🔍Terraform Validate'
+          inputs:
+            provider: 'azurerm'
+            command: 'validate'
+            environmentServiceNameAzureRM: '$(SERVICE_CONNECTION_NAME)'
+
+  - stage: CD
+    displayName: CD
+    jobs:
+      - job: ContinuousDeployment
+        steps:
+        - checkout: self
+        - task: Bash@3
+          displayName: '⚙️ Pin Terraform'
+          inputs:
+            targetType: 'inline'
+            script: |
+              set -euo pipefail
+
+              curl -SL "https://releases.hashicorp.com/terraform/${{ parameters.TERRAFORM_VERSION }}/terraform_${{ parameters.TERRAFORM_VERSION }}_linux_amd64.zip" --output terraform.zip
+              unzip "terraform.zip"
+              sudo mv terraform /usr/local/bin
+              terraform --version
+              rm terraform.zip
+        - task: TerraformTaskV4@4
+          displayName: '🌟Terraform Init'
+          inputs:
+            provider: 'azurerm'
+            command: 'init'
+            backendServiceArm: '$(SERVICE_CONNECTION_BACKEND)'
+            backendAzureRmResourceGroupName: $(TF_STORAGE_ACCOUNT_RG)
+            backendAzureRmStorageAccountName: $(TF_STORAGE_ACCOUNT_NAME)
+            backendAzureRmContainerName: $(TF_STORAGE_ACCOUNT_CONTAINER_NAME)
+            backendAzureRmKey: $(TF_STORAGE_ACCOUNT_CONTAINER_KEY_NAME)
+
+        - task: TerraformTaskV4@4
+          name: terraformValidate
+          displayName: '🔍Terraform Validate'
+          inputs:
+            provider: 'azurerm'
+            command: 'validate'
+            environmentServiceNameAzureRM: '$(SERVICE_CONNECTION_NAME)'
+
+        - task: TerraformTaskV4@4
+          displayName: '📝Terraform Plan'
+          name: terraformPlan
+          inputs:
+            provider: 'azurerm'
+            command: 'plan'
+            commandOptions: '-input=false -out main.tfplan'
+            environmentServiceNameAzureRM: '$(SERVICE_CONNECTION_NAME)'
+
+        - task: CopyFiles@2
+          displayName: '📂Copy Plan Artifact'
+          condition: succeeded()
+          inputs:
+            SourceFolder: '$(Build.SourcesDirectory)'
+            Contents: |
+              main.tfplan
+            TargetFolder: '$(Build.ArtifactStagingDirectory)'
+
+        - task: PublishBuildArtifacts@1
+          condition: succeeded()
+          displayName: '📦Publish Plan Artifact'
+          inputs:
+            PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+            ArtifactName: 'plan'
+
+        - task: TerraformTaskV4@4
+          displayName: '🚀Deploy'
+          name: terraformApply
+          inputs:
+            provider: 'azurerm'
+            command: 'apply'
+            commandOptions: main.tfplan
+            environmentServiceNameAzureRM: '$(SERVICE_CONNECTION_NAME)'
