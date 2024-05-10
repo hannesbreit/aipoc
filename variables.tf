@@ -6,7 +6,7 @@ variable "location" {
 variable "prefix" {
   description = "value to be used as prefix for the resources"
   type        = string
-  default     = "medtech"
+  default     = "medt234"
 }
 
 variable "stage" {
